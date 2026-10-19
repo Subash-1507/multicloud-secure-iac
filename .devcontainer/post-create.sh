@@ -7,7 +7,7 @@ set -euo pipefail
 chmod -R o-w "$PWD"
 
 # Pinned versions, pre-built wheels only: no third-party setup.py is executed
-pip install --user --only-binary :all: -r requirements-dev.txt
+pip install --user --require-hashes --only-binary :all: -r requirements-dev.txt
 ansible-galaxy collection install -r ansible/requirements.yml
 
 # Trivy from Aqua's signed apt repository (HTTPS only, TLS 1.2+, no downgrade on redirect)
