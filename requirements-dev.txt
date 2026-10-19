@@ -1,0 +1,4 @@
+# Extra tools for the Codespaces dev container
+-r requirements-ci.txt
+checkov==3.3.29
+pre-commit==4.7.0

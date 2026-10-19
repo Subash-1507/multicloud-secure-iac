@@ -53,7 +53,7 @@
       APT::Periodic::Unattended-Upgrade "1";
     owner: root
     group: root
-    mode: "0644"
+    mode: "0644" # Debian default for apt.conf.d; no secrets, non-root apt must read it
 
 - name: Rate-limit SSH through the host firewall
   community.general.ufw:
