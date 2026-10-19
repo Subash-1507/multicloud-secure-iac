@@ -1,0 +1,10 @@
+---
+# EC2 hosts are reached through AWS Systems Manager Session Manager, so the
+# security group needs no inbound rules at all.
+ansible_connection: community.aws.aws_ssm
+ansible_aws_ssm_region: ap-south-1
+# SSM moves module files through S3: point this at the encrypted data bucket.
+ansible_aws_ssm_bucket_name: "{{ lookup('ansible.builtin.env', 'SSM_TRANSFER_BUCKET') }}"
+
+# No SSH on these hosts, so the firewall should not open it either.
+baseline_hardening_firewall_allow_ssh: false

@@ -1,0 +1,4 @@
+# The state bucket is created once (by hand or a separate bootstrap stack)
+# with versioning, default encryption and Block Public Access turned on.
+bucket = "<your-state-bucket-name>"
+region = "ap-south-1"

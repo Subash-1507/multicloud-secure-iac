@@ -1,0 +1,31 @@
+---
+baseline_hardening_packages_present:
+  - auditd
+  - unattended-upgrades
+  - ufw
+
+# Legacy plaintext clients that have no place on a server
+baseline_hardening_packages_absent:
+  - telnet
+  - rsh-client
+  - talk
+
+baseline_hardening_ssh_permit_root_login: "no"
+baseline_hardening_ssh_password_authentication: "no"
+baseline_hardening_ssh_max_auth_tries: 3
+baseline_hardening_ssh_allow_tcp_forwarding: "no"
+
+# Set false for hosts reached only through SSM / Azure Bastion
+baseline_hardening_firewall_allow_ssh: true
+
+baseline_hardening_sysctl:
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
+  net.ipv4.conf.all.send_redirects: 0
+  net.ipv4.conf.all.accept_source_route: 0
+  net.ipv4.conf.all.rp_filter: 1
+  net.ipv4.conf.all.log_martians: 1
+  net.ipv4.icmp_echo_ignore_broadcasts: 1
+  net.ipv4.tcp_syncookies: 1
+  kernel.randomize_va_space: 2
+  fs.suid_dumpable: 0

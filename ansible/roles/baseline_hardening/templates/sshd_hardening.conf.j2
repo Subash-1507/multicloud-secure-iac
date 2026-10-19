@@ -1,0 +1,11 @@
+# Managed by Ansible (role: baseline_hardening). Local edits will be overwritten.
+PermitRootLogin {{ baseline_hardening_ssh_permit_root_login }}
+PasswordAuthentication {{ baseline_hardening_ssh_password_authentication }}
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+MaxAuthTries {{ baseline_hardening_ssh_max_auth_tries }}
+AllowTcpForwarding {{ baseline_hardening_ssh_allow_tcp_forwarding }}
+X11Forwarding no
+LoginGraceTime 30
+ClientAliveInterval 300
+ClientAliveCountMax 2

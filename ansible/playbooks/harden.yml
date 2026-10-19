@@ -1,0 +1,7 @@
+---
+- name: Apply baseline hardening to Linux hosts
+  hosts: all
+  become: true
+  gather_facts: true
+  roles:
+    - role: baseline_hardening

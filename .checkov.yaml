@@ -1,0 +1,13 @@
+# Checkov runs against the whole repo in CI (bridgecrewio/checkov-action, directory: .)
+# Every suppression must be inline with a reason:
+#   # checkov:skip=CKV_AWS_144: Cross-region replication is out of scope for a dev environment
+framework:
+  - terraform
+  - ansible
+  - github_actions
+  - secrets
+skip-path:
+  - .terraform
+compact: true
+quiet: true                      # print failed checks only
+download-external-modules: false

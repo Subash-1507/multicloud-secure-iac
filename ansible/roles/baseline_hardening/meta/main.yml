@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: baseline_hardening
+  namespace: subash
+  author: Subash Chandra Bose
+  description: Baseline OS hardening for Ubuntu hosts (SSH, sysctl, auditd, host firewall, automatic updates)
+  license: MIT
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+  galaxy_tags:
+    - security
+    - hardening
+    - cis
+dependencies: []

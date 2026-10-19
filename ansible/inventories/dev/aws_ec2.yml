@@ -1,0 +1,13 @@
+---
+# Dynamic inventory: hosts come from EC2 tags, never from hardcoded IPs.
+plugin: amazon.aws.aws_ec2
+regions:
+  - ap-south-1
+filters:
+  tag:Project: multicloud-secure-iac
+  instance-state-name: running
+hostnames:
+  - instance-id # SSM connects by instance ID: no public IP, no port 22
+keyed_groups:
+  - key: tags.Role
+    prefix: role
