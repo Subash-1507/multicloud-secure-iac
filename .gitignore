@@ -32,3 +32,6 @@ results/
 .DS_Store
 __pycache__/
 .venv/
+
+# Lock files belong to root modules (terraform/envs/*), not to child modules
+terraform/modules/**/.terraform.lock.hcl

@@ -20,7 +20,7 @@ Secure-by-default infrastructure for **AWS and Azure**, provisioned with **Terra
 | AWS network + EC2 over SSM | 🚧 In progress |
 | Azure dev environment (resource group, remote state with Entra ID auth, no keys) | ✅ Deployed |
 | Azure Key Vault + customer-managed key (RBAC, purge protection, firewall, auto-rotation) | ✅ Deployed |
-| Azure storage account encrypted with the customer-managed key | 🚧 In progress |
+| Azure storage account encrypted with the customer-managed key (ZRS, double encryption, no shared keys, firewall) | ✅ Deployed |
 | Azure Linux VM hardened by Ansible | 🗓️ Planned |
 | GitHub OIDC deploys (no stored cloud keys) | 🗓️ Planned |
 
@@ -51,6 +51,15 @@ Secure-by-default infrastructure for **AWS and Azure**, provisioned with **Terra
 ![Key is non-exportable RSA-3072, recoverable, with a one-year expiry matching Terraform state](docs/images/09-kv-key-attributes.png)
 ![Key Vault Crypto Officer granted to the Terraform identity, scoped to this vault only](docs/images/10-kv-rbac.png)
 ![Key Vault properties: Standard tier, soft delete 7 days, purge protection enabled and irreversible](docs/images/11-kv-properties.png)
+
+**Checkov blocked the new storage account with 5 findings.** I fixed one (LRS to ZRS) and recorded four as accepted risk, not applicable or false positive, plus geo-replication accepted for data residency:
+
+![Checkov: 5 failed checks on the storage account, make scan blocked](docs/images/12-storage-checkov-findings.png)
+![After decisions: 0 failed checks, all security gates pass](docs/images/13-storage-checkov-resolved.png)
+
+**Storage encrypted with my customer-managed key** (envelope encryption): key source Key Vault, the versionless key resolved to the current version, infrastructure encryption on, zone-redundant, shared keys disabled, firewall Deny:
+
+![Storage account encryption: keySource Microsoft.Keyvault with cmk-storage, ZRS, shared key access disabled](docs/images/14-storage-cmk-encryption.png)
 
 ## How a change reaches `main`
 
