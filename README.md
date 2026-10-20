@@ -8,6 +8,59 @@ Secure-by-default infrastructure for **AWS and Azure**, provisioned with **Terra
 
 > 📄 **Case study:** [How I hardened this pipeline's tool supply chain](docs/case-studies/01-ci-supply-chain-hardening.md): SonarQube security rating C → A, hash-verified dependencies, 10/10 CI gates.
 
+## How it works
+
+**1. Every change goes through the security pipeline before it can reach `main`:**
+
+```mermaid
+flowchart LR
+  dev["Developer in Codespaces"] --> pc["pre-commit<br/>fmt · validate · TFLint<br/>Gitleaks · ansible-lint"]
+  pc --> pr["Pull request"]
+  pr --> gates
+  subgraph gates["7 required checks · GitHub Actions"]
+    direction TB
+    g1["Terraform fmt + TFLint"]
+    g2["Terraform validate<br/>aws-dev · azure-dev"]
+    g3["Checkov"]
+    g4["Trivy"]
+    g5["Gitleaks"]
+    g6["ansible-lint"]
+    g7["SonarQube Cloud<br/>Quality Gate"]
+  end
+  g3 --> sarif["GitHub Security tab<br/>alerts triaged with written reasons"]
+  g4 --> sarif
+  gates -->|"all green"| main["main<br/>protected: PR only, no force push"]
+  main --> apply["terraform plan / apply<br/>from Codespaces, Entra ID sign-in<br/>OIDC from GitHub Actions: planned"]
+```
+
+**2. What is deployed on Azure, and how the pieces trust each other:**
+
+```mermaid
+flowchart TB
+  tf["Terraform"]
+
+  subgraph tfstate_rg["rg-msi-tfstate"]
+    state[("State storage account<br/>shared keys off · TLS 1.2<br/>versioning + soft delete")]
+  end
+
+  subgraph dev_rg["rg-msi-dev · southeastasia"]
+    kv["Key Vault · Standard<br/>RBAC · purge protection<br/>firewall: deny + allowed IP"]
+    key["cmk-storage<br/>RSA-3072 · wrap/unwrap only<br/>non-exportable · auto-rotates yearly"]
+    mi["User-assigned managed identity"]
+    sa[("Storage account<br/>customer-managed key · ZRS<br/>double encryption · no shared keys<br/>firewall: deny + allowed IP")]
+    kv --- key
+    sa -->|"authenticates as"| mi
+    mi -->|"Crypto Service Encryption User<br/>on this key only"| key
+    sa -.->|"data key wrapped by"| key
+  end
+
+  tf -->|"Entra ID auth · Blob Data Contributor<br/>on the state container only"| state
+  tf -->|"Key Vault Crypto Officer<br/>on this vault only"| kv
+  tf -->|"creates"| sa
+
+  aws["AWS module: S3 + KMS customer-managed key<br/>written and scanned · deploy blocked by the account's Organizations SCP"]
+```
+
 ## Status
 
 | Part | State |
