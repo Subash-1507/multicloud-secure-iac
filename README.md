@@ -15,11 +15,34 @@ Secure-by-default infrastructure for **AWS and Azure**, provisioned with **Terra
 | CI security gates (7 required checks, protected `main`) | ✅ Done |
 | Hash-locked tool supply chain | ✅ Done ([case study](docs/case-studies/01-ci-supply-chain-hardening.md)) |
 | Codespaces dev container with `make scan` | ✅ Done |
-| AWS secure storage module (S3 + customer-managed KMS key) | ✅ Written and scanned · 🚧 not yet deployed |
+| AWS secure storage module (S3 + customer-managed KMS key) | ✅ Written and scanned · ⛔ deploy blocked by the account's AWS Organizations SCP |
 | Ansible `baseline_hardening` role | ✅ Written and linted · 🚧 not yet run on a host |
 | AWS network + EC2 over SSM | 🚧 In progress |
-| Azure (Key Vault, storage with CMK, VM) | 🗓️ Planned |
+| Azure dev environment (resource group, remote state with Entra ID auth, no keys) | ✅ Deployed |
+| Azure secure storage + Key Vault customer-managed key | 🚧 In progress |
+| Azure Linux VM hardened by Ansible | 🗓️ Planned |
 | GitHub OIDC deploys (no stored cloud keys) | 🗓️ Planned |
+
+## Evidence
+
+**Every security gate passes locally before code is pushed** (`make scan`):
+
+![make scan running Terraform validate, TFLint, Checkov](docs/images/01-make-scan.png)
+![Trivy finds 0 misconfigurations in both environments; ansible-lint passes; all gates pass](docs/images/02-scan-summary.png)
+
+**SonarQube Cloud Quality Gate: passed, security rating A.** The one counted issue is an accepted, documented risk (`0644` on an apt config file):
+
+![SonarQube Cloud project health: Quality Gate passed, security rating A](docs/images/03-sonarqube-gate.png)
+
+**Control plane vs data plane on Azure.** As subscription Owner I could create the state container but not read it, until I granted *Storage Blob Data Contributor* scoped to that single container:
+
+![Owner is denied blob access: data-plane permission required](docs/images/04-data-plane-denied.png)
+![After the container-scoped role assignment: data-plane access works](docs/images/05-data-plane-ok.png)
+
+**Hardened Terraform state storage:** account keys and anonymous blob access disabled, HTTPS only, TLS 1.2 minimum:
+
+![Storage account configuration: key access and anonymous access disabled, secure transfer required](docs/images/06-storage-hardening.png)
+![Storage account minimum TLS version 1.2](docs/images/07-storage-tls.png)
 
 ## How a change reaches `main`
 
