@@ -12,3 +12,13 @@ resource "azurerm_resource_group" "this" {
   location = var.location
   tags     = local.tags
 }
+
+module "secure_storage" {
+  source = "../../modules/azure-secure-storage"
+
+  name                = "msidev"
+  location            = azurerm_resource_group.this.location
+  resource_group_name = azurerm_resource_group.this.name
+  allowed_ip_cidrs    = var.allowed_ip_cidrs
+  tags                = local.tags
+}
