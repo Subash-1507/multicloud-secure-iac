@@ -13,3 +13,8 @@ variable "owner" {
   description = "Owner tag applied to every resource."
   type        = string
 }
+
+variable "allowed_ip_cidrs" {
+  description = "Public IPs in CIDR form allowed through the Key Vault and storage firewalls."
+  type        = list(string)
+}

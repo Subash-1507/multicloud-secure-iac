@@ -19,7 +19,8 @@ Secure-by-default infrastructure for **AWS and Azure**, provisioned with **Terra
 | Ansible `baseline_hardening` role | ✅ Written and linted · 🚧 not yet run on a host |
 | AWS network + EC2 over SSM | 🚧 In progress |
 | Azure dev environment (resource group, remote state with Entra ID auth, no keys) | ✅ Deployed |
-| Azure secure storage + Key Vault customer-managed key | 🚧 In progress |
+| Azure Key Vault + customer-managed key (RBAC, purge protection, firewall, auto-rotation) | ✅ Deployed |
+| Azure storage account encrypted with the customer-managed key | 🚧 In progress |
 | Azure Linux VM hardened by Ansible | 🗓️ Planned |
 | GitHub OIDC deploys (no stored cloud keys) | 🗓️ Planned |
 
@@ -43,6 +44,13 @@ Secure-by-default infrastructure for **AWS and Azure**, provisioned with **Terra
 
 ![Storage account configuration: key access and anonymous access disabled, secure transfer required](docs/images/06-storage-hardening.png)
 ![Storage account minimum TLS version 1.2](docs/images/07-storage-tls.png)
+
+**Key Vault holding a customer-managed key**, deployed with Terraform: RBAC permission model, purge protection, firewall denying everything except one IP, and an RSA-3072 key limited to wrap/unwrap:
+
+![terraform apply: Key Vault, role assignment and key created](docs/images/08-kv-apply.png)
+![Key is non-exportable RSA-3072, recoverable, with a one-year expiry matching Terraform state](docs/images/09-kv-key-attributes.png)
+![Key Vault Crypto Officer granted to the Terraform identity, scoped to this vault only](docs/images/10-kv-rbac.png)
+![Key Vault properties: Standard tier, soft delete 7 days, purge protection enabled and irreversible](docs/images/11-kv-properties.png)
 
 ## How a change reaches `main`
 
