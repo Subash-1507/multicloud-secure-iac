@@ -14,52 +14,27 @@ Secure-by-default infrastructure for **AWS and Azure**, provisioned with **Terra
 
 ```mermaid
 flowchart LR
-  dev["Developer in Codespaces"] --> pc["pre-commit<br/>fmt · validate · TFLint<br/>Gitleaks · ansible-lint"]
+  dev["Developer<br/>(Codespaces)"] --> pc["pre-commit<br/>local gates"]
   pc --> pr["Pull request"]
-  pr --> gates
-  subgraph gates["7 required checks · GitHub Actions"]
-    direction TB
-    g1["Terraform fmt + TFLint"]
-    g2["Terraform validate<br/>aws-dev · azure-dev"]
-    g3["Checkov"]
-    g4["Trivy"]
-    g5["Gitleaks"]
-    g6["ansible-lint"]
-    g7["SonarQube Cloud<br/>Quality Gate"]
-  end
-  g3 --> sarif["GitHub Security tab<br/>alerts triaged with written reasons"]
-  g4 --> sarif
-  gates -->|"all green"| main["main<br/>protected: PR only, no force push"]
-  main --> apply["terraform plan / apply<br/>from Codespaces, Entra ID sign-in<br/>OIDC from GitHub Actions: planned"]
+  pr --> gates["7 required checks<br/>─────────────<br/>Terraform fmt + TFLint<br/>Terraform validate<br/>Checkov · Trivy<br/>Gitleaks · ansible-lint<br/>SonarQube Quality Gate"]
+  gates -->|"all green"| main["main<br/>(protected)"]
+  gates -.->|"findings"| sec["GitHub Security tab<br/>triaged with reasons"]
+  main --> apply["terraform apply<br/>(Entra ID sign-in)"]
 ```
 
 **2. What is deployed on Azure, and how the pieces trust each other:**
 
 ```mermaid
-flowchart TB
-  tf["Terraform"]
-
-  subgraph tfstate_rg["rg-msi-tfstate"]
-    state[("State storage account<br/>shared keys off · TLS 1.2<br/>versioning + soft delete")]
-  end
-
-  subgraph dev_rg["rg-msi-dev · southeastasia"]
-    kv["Key Vault · Standard<br/>RBAC · purge protection<br/>firewall: deny + allowed IP"]
-    key["cmk-storage<br/>RSA-3072 · wrap/unwrap only<br/>non-exportable · auto-rotates yearly"]
-    mi["User-assigned managed identity"]
-    sa[("Storage account<br/>customer-managed key · ZRS<br/>double encryption · no shared keys<br/>firewall: deny + allowed IP")]
-    kv --- key
-    sa -->|"authenticates as"| mi
-    mi -->|"Crypto Service Encryption User<br/>on this key only"| key
-    sa -.->|"data key wrapped by"| key
-  end
-
-  tf -->|"Entra ID auth · Blob Data Contributor<br/>on the state container only"| state
-  tf -->|"Key Vault Crypto Officer<br/>on this vault only"| kv
+flowchart LR
+  tf["Terraform"] -->|"Entra ID auth<br/>Blob Data Contributor<br/>(state container only)"| state[("Remote state<br/>shared keys off<br/>versioning")]
+  tf -->|"Crypto Officer<br/>(this vault only)"| kv["Key Vault<br/>RBAC · purge protection<br/>firewall deny + 1 IP"]
+  kv --- key["cmk-storage<br/>RSA-3072<br/>wrap/unwrap only<br/>auto-rotates"]
+  sa[("Storage account<br/>CMK · ZRS<br/>double encryption<br/>no shared keys<br/>firewall deny + 1 IP")] -->|"authenticates as"| mi["Managed identity"]
+  mi -->|"Encryption User<br/>(this key only)"| key
   tf -->|"creates"| sa
-
-  aws["AWS module: S3 + KMS customer-managed key<br/>written and scanned · deploy blocked by the account's Organizations SCP"]
 ```
+
+The AWS module (S3 + KMS customer-managed key) is written and scanned; deploying it is blocked by the AWS account's Organizations SCP.
 
 ## Status
 
