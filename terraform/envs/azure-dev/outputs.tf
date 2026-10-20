@@ -7,3 +7,8 @@ output "key_vault_name" {
   description = "Key Vault holding the customer-managed key."
   value       = module.secure_storage.key_vault_name
 }
+
+output "storage_account_name" {
+  description = "Storage account encrypted with the customer-managed key."
+  value       = module.secure_storage.storage_account_name
+}
