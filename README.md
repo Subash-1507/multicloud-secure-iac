@@ -8,6 +8,34 @@ Secure-by-default infrastructure for **AWS and Azure**, provisioned with **Terra
 
 > 📄 **Case study:** [How I hardened this pipeline's tool supply chain](docs/case-studies/01-ci-supply-chain-hardening.md): SonarQube security rating C → A, hash-verified dependencies, 10/10 CI gates.
 
+## How it works
+
+**1. Every change goes through the security pipeline before it can reach `main`:**
+
+```mermaid
+flowchart LR
+  dev["Developer<br/>(Codespaces)"] --> pc["pre-commit<br/>local gates"]
+  pc --> pr["Pull request"]
+  pr --> gates["7 required checks<br/>─────────────<br/>Terraform fmt + TFLint<br/>Terraform validate<br/>Checkov · Trivy<br/>Gitleaks · ansible-lint<br/>SonarQube Quality Gate"]
+  gates -->|"all green"| main["main<br/>(protected)"]
+  gates -.->|"findings"| sec["GitHub Security tab<br/>triaged with reasons"]
+  main --> apply["terraform apply<br/>(Entra ID sign-in)"]
+```
+
+**2. What is deployed on Azure, and how the pieces trust each other:**
+
+```mermaid
+flowchart LR
+  tf["Terraform"] -->|"Entra ID auth<br/>Blob Data Contributor<br/>(state container only)"| state[("Remote state<br/>shared keys off<br/>versioning")]
+  tf -->|"Crypto Officer<br/>(this vault only)"| kv["Key Vault<br/>RBAC · purge protection<br/>firewall deny + 1 IP"]
+  kv --- key["cmk-storage<br/>RSA-3072<br/>wrap/unwrap only<br/>auto-rotates"]
+  sa[("Storage account<br/>CMK · ZRS<br/>double encryption<br/>no shared keys<br/>firewall deny + 1 IP")] -->|"authenticates as"| mi["Managed identity"]
+  mi -->|"Encryption User<br/>(this key only)"| key
+  tf -->|"creates"| sa
+```
+
+The AWS module (S3 + KMS customer-managed key) is written and scanned; deploying it is blocked by the AWS account's Organizations SCP.
+
 ## Status
 
 | Part | State |
