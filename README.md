@@ -19,7 +19,7 @@ flowchart LR
   pr --> gates["7 required checks<br/>─────────────<br/>Terraform fmt + TFLint<br/>Terraform validate<br/>Checkov · Trivy<br/>Gitleaks · ansible-lint<br/>SonarQube Quality Gate"]
   gates -->|"all green"| main["main<br/>(protected)"]
   gates -.->|"findings"| sec["GitHub Security tab<br/>triaged with reasons"]
-  main --> apply["terraform apply<br/>(Entra ID sign-in)"]
+  main --> apply["terraform apply<br/>(Entra ID sign-in;<br/>GitHub OIDC next)"]
 ```
 
 **2. What is deployed on Azure, and how the pieces trust each other:**
@@ -27,11 +27,21 @@ flowchart LR
 ```mermaid
 flowchart LR
   tf["Terraform"] -->|"Entra ID auth<br/>Blob Data Contributor<br/>(state container only)"| state[("Remote state<br/>shared keys off<br/>versioning")]
-  tf -->|"Crypto Officer<br/>(this vault only)"| kv["Key Vault<br/>RBAC · purge protection<br/>firewall deny + 1 IP"]
+  tf -->|"Crypto Officer<br/>(this vault only)"| kv["Key Vault<br/>RBAC · purge protection<br/>firewall deny<br/>just-in-time IP"]
   kv --- key["cmk-storage<br/>RSA-3072<br/>wrap/unwrap only<br/>auto-rotates"]
-  sa[("Storage account<br/>CMK · ZRS<br/>double encryption<br/>no shared keys<br/>firewall deny + 1 IP")] -->|"authenticates as"| mi["Managed identity"]
+  sa[("Storage account<br/>CMK · ZRS<br/>double encryption<br/>no shared keys<br/>firewall deny<br/>just-in-time IP")] -->|"authenticates as"| mi["Managed identity"]
   mi -->|"Encryption User<br/>(this key only)"| key
   tf -->|"creates"| sa
+```
+
+**3. How GitHub Actions signs in to Azure: no secrets, and nothing deploys without approval:**
+
+```mermaid
+flowchart LR
+  pr["Pull request"] -->|"OIDC token<br/>subject: pull_request"| plan["id-msi-gha-plan<br/>Reader on the RG<br/>state container only"]
+  main["main + my approval<br/>(azure-dev environment)"] -->|"OIDC token<br/>subject: environment:azure-dev"| apply["id-msi-gha-apply<br/>Contributor on the RG<br/>RBAC Admin, ABAC-limited"]
+  apply -->|"may grant only"| roles["Key Vault Crypto Officer<br/>Crypto Service Encryption User"]
+  apply -.->|"blocked by ABAC"| owner["Owner / any other role"]
 ```
 
 The AWS module (S3 + KMS customer-managed key) is written and scanned; deploying it is blocked by the AWS account's Organizations SCP.
@@ -50,7 +60,9 @@ The AWS module (S3 + KMS customer-managed key) is written and scanned; deploying
 | Azure Key Vault + customer-managed key (RBAC, purge protection, firewall, auto-rotation) | ✅ Deployed |
 | Azure storage account encrypted with the customer-managed key (ZRS, double encryption, no shared keys, firewall) | ✅ Deployed |
 | Azure Linux VM hardened by Ansible | 🗓️ Planned |
-| GitHub OIDC deploys (no stored cloud keys) | 🗓️ Planned |
+| GitHub OIDC identities: federated credentials, least-privilege roles, ABAC-limited role delegation | ✅ Deployed |
+| Just-in-time firewall access (`scripts/azure-firewall-ip.sh`) | ✅ Done |
+| GitHub Actions plan/apply workflow with an approval gate | 🚧 In progress |
 
 ## Evidence
 
@@ -105,13 +117,13 @@ The AWS module (S3 + KMS customer-managed key) is written and scanned; deploying
  └─ SonarQube Cloud ────────────────── SAST + IaC rules + dependency risks; Quality Gate blocks merge
      │ all 7 green
      ▼
- main ──► terraform plan/apply via GitHub OIDC (planned: no stored cloud keys)
+ main ──► terraform plan/apply via GitHub OIDC (identities deployed; workflow in progress)
 ```
 
 ## Target architecture
 
 ```
- AWS (ap-south-1)                          Azure (Central India)
+ AWS (ap-south-1)                          Azure (Southeast Asia)
  ├─ S3 data bucket                         ├─ Storage account
  │   SSE-KMS, customer-managed key         │   CMK in Key Vault, shared keys off
  │   TLS 1.2+ only, no public access       │   TLS 1.2+, no public blob access
@@ -129,8 +141,24 @@ The AWS module (S3 + KMS customer-managed key) is written and scanned; deploying
 | Public exposure | Block Public Access on, ACLs disabled | Public blob access off |
 | Admin access | SSM Session Manager, no port 22 | Bastion / NSG allowlist |
 | Host baseline | Ansible `baseline_hardening` role | Same role |
-| CI credentials | GitHub OIDC to an IAM role | GitHub OIDC to an Entra ID app |
+| CI credentials | GitHub OIDC to an IAM role | GitHub OIDC to user-assigned managed identities (federated credentials, no secrets) |
+| Network access to secrets | n/a | Key Vault and storage firewalls default Deny; IPs added just in time, never in code |
 | State | S3 backend, encrypted, native locking | azurerm backend, Entra ID auth |
+
+## CI access to Azure (GitHub OIDC)
+
+GitHub Actions never holds an Azure secret. Each run gets a short-lived token from GitHub, and Azure accepts it only if its **subject** matches a federated credential:
+
+| Identity | Who can use it | What it can do |
+|---|---|---|
+| `id-msi-gha-plan` | Pull requests (`repo:…:pull_request`) | Read the resource group; read and lock the state blob. Cannot change anything. |
+| `id-msi-gha-apply` | Only the `azure-dev` environment (`repo:…:environment:azure-dev`), which requires my approval and runs only from `main` | Manage resources in one resource group; grant **only** the two Key Vault roles |
+
+**Why the apply identity cannot escalate:** Terraform must create the Key Vault role assignments, so the identity has *Role Based Access Control Administrator*. On its own, that role could grant itself Owner. An **ABAC condition** limits it to assigning or removing *Key Vault Crypto Officer* and *Key Vault Crypto Service Encryption User*. Every other role is denied by Azure itself. *Contributor* cannot grant roles, so the identity's reach stays inside one resource group, behind an approval.
+
+**Just-in-time network access:** the Key Vault and the storage account deny all networks. Terraform ignores their IP lists, so no IP is ever committed. `scripts/azure-firewall-ip.sh` adds the caller's current IP before work and removes it after (`add`, `remove`, `reset`, `list`). The CI apply job will do the same and always remove the runner's IP, even on failure.
+
+**Accepted risk, documented inline:** SonarQube rule S6381 flags the *Contributor* assignment. It is scoped to one resource group, usable only from the approval-gated environment, and cannot be used to grant roles. The decision sits next to the code as a `NOSONAR` comment with its reason.
 
 ## Pipeline supply-chain security
 
@@ -156,6 +184,7 @@ ansible/inventories/dev/              dynamic inventories, no hardcoded IPs
 requirements-*.in / requirements-*.txt  tool versions / hash-locked lock files
 docs/case-studies/                    write-ups of real problems and how they were solved
 docs/decisions/                       architecture decision records (ADRs)
+scripts/azure-firewall-ip.sh          just-in-time firewall access for the dev Key Vault and storage
 Makefile                              `make scan` runs every CI gate locally
 ```
 
@@ -187,16 +216,20 @@ pip-compile --generate-hashes --allow-unsafe --output-file requirements-ci.txt r
 pip-compile --generate-hashes --allow-unsafe --output-file requirements-dev.txt requirements-dev.in
 ```
 
-### Deploying (not yet live)
-
-The AWS dev environment is written and validated but not deployed yet. When it is, deployment will be:
+### Deploying the Azure dev environment
 
 ```bash
-cd terraform/envs/aws-dev
-cp backend.hcl.example backend.hcl && cp terraform.tfvars.example terraform.tfvars
+az login
+scripts/azure-firewall-ip.sh reset      # allow only your current IP, just in time
+cd terraform/envs/azure-dev
+cp backend.hcl.example backend.hcl && cp terraform.tfvars.example terraform.tfvars   # fill in; both are git-ignored
 terraform init -backend-config=backend.hcl
-terraform plan
+terraform plan -out=dev.tfplan          # review: nothing should be destroyed
+terraform apply dev.tfplan && rm dev.tfplan
+../../../scripts/azure-firewall-ip.sh remove
 ```
+
+The AWS dev environment is written and validated, but its deployment is blocked by the account's Organizations SCP.
 
 ## Suppression policy
 
@@ -204,6 +237,7 @@ Scanner findings are fixed, not hidden. When a check genuinely does not apply, i
 
 ```hcl
 # checkov:skip=CKV_AWS_145: S3 server access log delivery requires SSE-S3 on the target bucket
+role_definition_name = "Contributor" # NOSONAR(terraform:S6381): one RG, approval-gated env only; ...
 ```
 
 Every suppression is reviewed in the pull request like any other code.
