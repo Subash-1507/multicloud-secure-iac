@@ -14,10 +14,10 @@ variable "owner" {
   type        = string
 }
 
-variable "github_repository" {
-  description = "GitHub repository (owner/name) whose workflows may sign in to Azure."
+variable "github_oidc_subject_prefix" {
+  description = "Subject prefix in this repo's GitHub OIDC tokens. GitHub's immutable format includes the owner and repo IDs, so a renamed or re-created repo cannot reuse the trust. Check: gh api repos/OWNER/REPO/actions/oidc/customization/sub"
   type        = string
-  default     = "Subash-1507/multicloud-secure-iac"
+  default     = "repo:Subash-1507@91477713/multicloud-secure-iac@1425414156"
 }
 
 variable "workload_resource_group_name" {
