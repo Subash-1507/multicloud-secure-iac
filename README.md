@@ -42,6 +42,8 @@ flowchart LR
   main["main + my approval<br/>(azure-dev environment)"] -->|"OIDC token<br/>subject: environment:azure-dev"| apply["id-msi-gha-apply<br/>Contributor on the RG<br/>RBAC Admin, ABAC-limited"]
   apply -->|"may grant only"| roles["Key Vault Crypto Officer<br/>Crypto Service Encryption User"]
   apply -.->|"blocked by ABAC"| owner["Owner / any other role"]
+  ci["rg-msi-ci<br/>identities + trust rules<br/>human-applied only"] -.-|"defines"| plan
+  ci -.-|"defines"| apply
 ```
 
 The AWS module (S3 + KMS customer-managed key) is written and scanned; deploying it is blocked by the AWS account's Organizations SCP.
@@ -156,6 +158,8 @@ GitHub Actions never holds an Azure secret. Each run gets a short-lived token fr
 
 **Why the apply identity cannot escalate:** Terraform must create the Key Vault role assignments, so the identity has *Role Based Access Control Administrator*. On its own, that role could grant itself Owner. An **ABAC condition** limits it to assigning or removing *Key Vault Crypto Officer* and *Key Vault Crypto Service Encryption User*. Every other role is denied by Azure itself. *Contributor* cannot grant roles, so the identity's reach stays inside one resource group, behind an approval.
 
+**Why the pipeline cannot change its own access:** both identities, their trust rules and their role assignments live in a separate resource group, `rg-msi-ci`, managed by its own Terraform root (`terraform/envs/azure-ci`) with its own state. Only a human applies that root. CI has no role on `rg-msi-ci`, so even an approved pipeline run cannot add a trust rule or widen its own permissions.
+
 **Just-in-time network access:** the Key Vault and the storage account deny all networks. Terraform ignores their IP lists, so no IP is ever committed. `scripts/azure-firewall-ip.sh` adds the caller's current IP before work and removes it after (`add`, `remove`, `reset`, `list`). The CI apply job will do the same and always remove the runner's IP, even on failure.
 
 **Accepted risk, documented inline:** SonarQube rule S6381 flags the *Contributor* assignment. It is scoped to one resource group, usable only from the approval-gated environment, and cannot be used to grant roles. The decision sits next to the code as a `NOSONAR` comment with its reason.
@@ -178,6 +182,7 @@ The tools that check the code are secured too:
 .devcontainer/                        Codespaces environment with every scanner installed
 terraform/modules/<cloud>-<purpose>/  reusable, secure-by-default modules
 terraform/envs/<cloud>-<env>/         thin root modules: backend, providers, module calls
+terraform/envs/azure-ci/              CI identities for GitHub OIDC; applied by a human only
 ansible/harden.yml                    playbook: applies baseline_hardening to all hosts
 ansible/roles/baseline_hardening/     OS hardening role (SSH, sysctl, auditd, ufw, updates)
 ansible/inventories/dev/              dynamic inventories, no hardcoded IPs

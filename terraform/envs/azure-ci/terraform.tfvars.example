@@ -1,0 +1,3 @@
+owner                        = "subash"
+key_vault_name               = "<your-key-vault>" # terraform -chdir=../azure-dev output -raw key_vault_name
+tfstate_storage_account_name = "<your-state-storage-account>"

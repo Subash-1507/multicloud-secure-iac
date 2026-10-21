@@ -55,7 +55,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        env: [aws-dev, azure-dev]
+        env: [aws-dev, azure-dev, azure-ci]
     defaults:
       run:
         working-directory: terraform/envs/${{ matrix.env }}
