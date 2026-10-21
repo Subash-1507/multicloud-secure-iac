@@ -63,13 +63,44 @@ resource "azurerm_role_assignment" "gha_apply_contributor" {
   principal_type       = "ServicePrincipal"
 }
 
-# Terraform manages role assignments (the Key Vault roles) inside this resource group.
-# Accepted risk: this role can grant any role within the resource group; hardening = ABAC condition limiting it to the Key Vault roles.
+# Terraform manages the Key Vault role assignments inside this resource group.
+# ABAC condition: this identity may only grant or remove the roles below, so it can never escalate itself to Owner.
+data "azurerm_role_definition" "delegable" {
+  for_each = toset(["Key Vault Crypto Officer", "Key Vault Crypto Service Encryption User"])
+  name     = each.value
+}
+
+locals {
+  delegable_role_ids = join(", ", [for r in data.azurerm_role_definition.delegable : r.role_definition_id])
+}
+
 resource "azurerm_role_assignment" "gha_apply_rbac_admin" {
   scope                = azurerm_resource_group.this.id
   role_definition_name = "Role Based Access Control Administrator"
   principal_id         = azurerm_user_assigned_identity.gha_apply.principal_id
   principal_type       = "ServicePrincipal"
+  condition_version    = "2.0"
+  condition            = <<-EOT
+    (
+      (
+        !(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})
+      )
+      OR
+      (
+        @Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {${local.delegable_role_ids}}
+      )
+    )
+    AND
+    (
+      (
+        !(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'})
+      )
+      OR
+      (
+        @Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {${local.delegable_role_ids}}
+      )
+    )
+  EOT
 }
 
 resource "azurerm_role_assignment" "gha_apply_state" {
