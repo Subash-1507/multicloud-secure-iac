@@ -4,9 +4,19 @@
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=Subash-1507_multicloud-secure-iac&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=Subash-1507_multicloud-secure-iac)
 [![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=Subash-1507_multicloud-secure-iac&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=Subash-1507_multicloud-secure-iac)
 
-Secure-by-default infrastructure for **AWS and Azure**, provisioned with **Terraform**, configured with **Ansible**, and gated by an automated **DevSecOps pipeline**. Nothing reaches `main` without passing SAST, IaC misconfiguration scanning, secret detection and linting.
+Secure-by-default infrastructure as code for **Azure and AWS**, written in **Terraform** and gated by an automated **DevSecOps pipeline**. Nothing reaches `main` without passing SAST, IaC misconfiguration scanning, secret detection and linting, and nothing reaches Azure without my approval. The Azure environment is **deployed and live**; the deploy pipeline holds **no stored cloud credentials**.
 
 > 📄 **Case study:** [How I hardened this pipeline's tool supply chain](docs/case-studies/01-ci-supply-chain-hardening.md): SonarQube security rating C → A, hash-verified dependencies, 10/10 CI gates.
+
+## Highlights
+
+- **Keyless deploys:** GitHub Actions signs in to Azure with OIDC. There is no client secret, and the trust rules match GitHub's immutable subject (owner and repo IDs).
+- **The pipeline cannot change its own access:** CI identities live in a separate resource group that only a human applies.
+- **No privilege escalation:** the deploy identity may grant only two Key Vault roles, enforced by an Azure ABAC condition.
+- **Approval gate:** every apply waits for my review in the `azure-dev` environment, runs only from `main`, and admin bypass is off.
+- **Just-in-time network access:** the Key Vault and storage firewalls deny everything. CI opens them for the runner's IP and always closes them, even when the apply fails.
+- **Customer-managed encryption:** an RSA-3072 key in Key Vault with RBAC, purge protection and auto-rotation encrypts a zone-redundant storage account that has shared keys disabled.
+- **Secured supply chain:** Actions pinned to commit SHAs, Python tools hash-locked, and every accepted risk documented next to the code.
 
 ## How it works
 
@@ -50,21 +60,22 @@ The AWS module (S3 + KMS customer-managed key) is written and scanned; deploying
 
 ## Status
 
+The project is **complete** for its current scope. Items marked *Future work* are designed or partly written, but not deployed.
+
 | Part | State |
 |---|---|
 | CI security gates (7 required checks, protected `main`) | ✅ Done |
 | Hash-locked tool supply chain | ✅ Done ([case study](docs/case-studies/01-ci-supply-chain-hardening.md)) |
 | Codespaces dev container with `make scan` | ✅ Done |
-| AWS secure storage module (S3 + customer-managed KMS key) | ✅ Written and scanned · ⛔ deploy blocked by the account's AWS Organizations SCP |
-| Ansible `baseline_hardening` role | ✅ Written and linted · 🚧 not yet run on a host |
-| AWS network + EC2 over SSM | 🚧 In progress |
 | Azure dev environment (resource group, remote state with Entra ID auth, no keys) | ✅ Deployed |
 | Azure Key Vault + customer-managed key (RBAC, purge protection, firewall, auto-rotation) | ✅ Deployed |
 | Azure storage account encrypted with the customer-managed key (ZRS, double encryption, no shared keys, firewall) | ✅ Deployed |
-| Azure Linux VM hardened by Ansible | 🗓️ Planned |
-| GitHub OIDC identities: federated credentials, least-privilege roles, ABAC-limited role delegation | ✅ Deployed |
+| GitHub OIDC identities in their own resource group, ABAC-limited role delegation | ✅ Deployed |
 | Just-in-time firewall access (`scripts/azure-firewall-ip.sh`) | ✅ Done |
-| GitHub Actions deploys: plan on every PR, apply on `main` after my approval, just-in-time firewall | ✅ Live |
+| GitHub Actions deploys: plan on every PR, apply on `main` after my approval | ✅ Live |
+| AWS secure storage module (S3 + customer-managed KMS key) | ✅ Written and scanned · ⛔ deploy blocked by the account's AWS Organizations SCP |
+| Ansible `baseline_hardening` role (SSH, sysctl, auditd, ufw, automatic updates) | ✅ Written and linted · 🗓️ Future work: run on a host |
+| Linux VM hardened by Ansible; AWS EC2 over SSM | 🗓️ Future work |
 
 ## Evidence
 
@@ -130,16 +141,20 @@ The AWS module (S3 + KMS customer-managed key) is written and scanned; deploying
  main ──► terraform-azure.yml: apply after my approval (GitHub OIDC, no stored cloud keys)
 ```
 
-## Target architecture
+## Architecture
 
 ```
- AWS (ap-south-1)                          Azure (Southeast Asia)
- ├─ S3 data bucket                         ├─ Storage account
- │   SSE-KMS, customer-managed key         │   CMK in Key Vault, shared keys off
- │   TLS 1.2+ only, no public access       │   TLS 1.2+, no public blob access
- ├─ S3 access-log bucket                   ├─ Key Vault (RBAC, purge protection)
- └─ EC2 hardened by Ansible over SSM       └─ Linux VM hardened by Ansible
-     (no inbound ports, no SSH keys)
+ Azure (Southeast Asia) · deployed                AWS (ap-south-1) · written and scanned
+ ├─ rg-msi-dev  (workload, deployed by CI)        ├─ S3 data bucket
+ │   ├─ Key Vault: RBAC, purge protection,        │   SSE-KMS, customer-managed key
+ │   │   firewall deny, just-in-time IP           │   TLS 1.2+ only, no public access
+ │   ├─ cmk-storage: RSA-3072, auto-rotates       └─ S3 access-log bucket
+ │   └─ Storage account: CMK, ZRS, double
+ │       encryption, no shared keys, firewall deny
+ ├─ rg-msi-ci   (CI identities, human-applied only)
+ │   ├─ id-msi-gha-plan   (pull requests, read-only)
+ │   └─ id-msi-gha-apply  (approved main runs, ABAC-limited)
+ └─ rg-msi-tfstate (Terraform state, Entra ID auth, shared keys off)
 ```
 
 ## Security controls
@@ -149,8 +164,9 @@ The AWS module (S3 + KMS customer-managed key) is written and scanned; deploying
 | Encryption at rest | SSE-KMS, customer-managed key, yearly rotation | Customer-managed key in Key Vault |
 | Encryption in transit | Bucket policy denies non-TLS and TLS < 1.2 | `min_tls_version = TLS1_2`, HTTPS only |
 | Public exposure | Block Public Access on, ACLs disabled | Public blob access off |
-| Admin access | SSM Session Manager, no port 22 | Bastion / NSG allowlist |
-| Host baseline | Ansible `baseline_hardening` role | Same role |
+| Host access *(future work)* | SSM Session Manager, no port 22 ([ADR 0001](docs/decisions/0001-ssm-instead-of-ssh.md)) | Just-in-time SSH from one IP, keys only |
+| Host baseline *(future work)* | Ansible `baseline_hardening` role | Same role |
+| Deploy approval | n/a | `azure-dev` environment: required reviewer, `main` only, no admin bypass |
 | CI credentials | GitHub OIDC to an IAM role | GitHub OIDC to user-assigned managed identities (federated credentials, no secrets) |
 | Network access to secrets | n/a | Key Vault and storage firewalls default Deny; IPs added just in time, never in code |
 | State | S3 backend, encrypted, native locking | azurerm backend, Entra ID auth |
@@ -173,6 +189,24 @@ GitHub Actions never holds an Azure secret. Each run gets a short-lived token fr
 **Immutable OIDC subject:** this repository's tokens carry GitHub's immutable subject (`repo:<owner>@<owner-id>/<repo>@<repo-id>:…`), and the trust rules match it. A renamed or re-created repository with the same name gets a different ID, so it cannot reuse the trust.
 
 **Accepted risk, documented inline:** SonarQube rule S6381 flags the *Contributor* assignment. It is scoped to one resource group, usable only from the approval-gated environment, and cannot be used to grant roles. The decision sits next to the code as a `NOSONAR` comment with its reason.
+
+## Known limitations and accepted risks
+
+Recorded here so the trade-offs are explicit:
+
+| Item | Why it is accepted | What would change it |
+|---|---|---|
+| The state storage account accepts any network | Every request still needs Entra ID and a data-plane role on the one container, and shared keys are off. GitHub-hosted runners have changing IPs. | Self-hosted runners or private endpoints |
+| PR plans run with `-refresh=false` | The read-only plan identity cannot (and should not) open the firewalls, so PR plans compare code with saved state. The apply job does a full refresh. | A scheduled drift-detection run with the apply identity |
+| I approve my own deployments | Solo project. | In a team: a second required reviewer and *Prevent self-review* |
+| *Contributor* on the workload resource group | Scoped to one resource group, behind the approval gate; role grants are ABAC-limited. | Narrow built-in roles per resource type |
+| Zone-redundant (ZRS), not geo-redundant, storage | Dev data with no cross-region recovery requirement; documented inline as a Checkov skip. | GZRS for production |
+
+## Future work
+
+- **Linux VM hardened by Ansible:** Trusted Launch VM, no password login, just-in-time SSH, then the existing `baseline_hardening` role, measured with a **Lynis hardening index before and after**, plus an idempotency check (`changed=0` on the second run).
+- **Guardrail tests:** a workflow that *attacks* the controls and expects failure: a PR token trying the apply identity, the apply identity trying to grant itself Owner, editing its own trust rule, and checking that the firewall is closed after every run.
+- **AWS deployment** of the S3 + KMS module once the account's Organizations SCP allows it.
 
 ## Pipeline supply-chain security
 
@@ -233,6 +267,10 @@ pip-compile --generate-hashes --allow-unsafe --output-file requirements-dev.txt 
 ```
 
 ### Deploying the Azure dev environment
+
+**Normal path:** open a pull request. The **Terraform plan (azure-dev)** check shows what would change. Merge it, approve the `azure-dev` deployment, and the pipeline applies it.
+
+**Manual path** (from Codespaces, for the human-only `azure-ci` root or emergencies):
 
 ```bash
 az login
