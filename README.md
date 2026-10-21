@@ -19,7 +19,7 @@ flowchart LR
   pr --> gates["7 required checks<br/>─────────────<br/>Terraform fmt + TFLint<br/>Terraform validate<br/>Checkov · Trivy<br/>Gitleaks · ansible-lint<br/>SonarQube Quality Gate"]
   gates -->|"all green"| main["main<br/>(protected)"]
   gates -.->|"findings"| sec["GitHub Security tab<br/>triaged with reasons"]
-  main --> apply["terraform apply<br/>(Entra ID sign-in;<br/>GitHub OIDC next)"]
+  main --> apply["terraform apply<br/>(GitHub OIDC,<br/>after my approval)"]
 ```
 
 **2. What is deployed on Azure, and how the pieces trust each other:**
@@ -64,7 +64,7 @@ The AWS module (S3 + KMS customer-managed key) is written and scanned; deploying
 | Azure Linux VM hardened by Ansible | 🗓️ Planned |
 | GitHub OIDC identities: federated credentials, least-privilege roles, ABAC-limited role delegation | ✅ Deployed |
 | Just-in-time firewall access (`scripts/azure-firewall-ip.sh`) | ✅ Done |
-| GitHub Actions plan/apply workflow with an approval gate | 🚧 In progress |
+| GitHub Actions deploys: plan on every PR, apply on `main` after my approval, just-in-time firewall | ✅ Live |
 
 ## Evidence
 
@@ -103,6 +103,14 @@ The AWS module (S3 + KMS customer-managed key) is written and scanned; deploying
 
 ![Storage account encryption: keySource Microsoft.Keyvault with cmk-storage, ZRS, shared key access disabled](docs/images/14-storage-cmk-encryption.png)
 
+**First approval-gated deploy from GitHub Actions.** The merge to `main` waited for my approval; then the job signed in to Azure with OIDC (no stored secret), opened the firewalls for the runner's IP only, and ran `terraform plan` and `apply`:
+
+![Deployment approved; Terraform apply job: Azure OIDC login, just-in-time firewall opened, init and plan succeeded](docs/images/15-ci-approved-apply.png)
+
+**The firewall closes again every time**, even if the apply fails, and the runner's Azure session is cleared:
+
+![Close firewalls step succeeded; post-job az account clear](docs/images/16-ci-firewall-closed.png)
+
 ## How a change reaches `main`
 
 ```
@@ -119,7 +127,7 @@ The AWS module (S3 + KMS customer-managed key) is written and scanned; deploying
  └─ SonarQube Cloud ────────────────── SAST + IaC rules + dependency risks; Quality Gate blocks merge
      │ all 7 green
      ▼
- main ──► terraform plan/apply via GitHub OIDC (identities deployed; workflow in progress)
+ main ──► terraform-azure.yml: apply after my approval (GitHub OIDC, no stored cloud keys)
 ```
 
 ## Target architecture
@@ -160,7 +168,9 @@ GitHub Actions never holds an Azure secret. Each run gets a short-lived token fr
 
 **Why the pipeline cannot change its own access:** both identities, their trust rules and their role assignments live in a separate resource group, `rg-msi-ci`, managed by its own Terraform root (`terraform/envs/azure-ci`) with its own state. Only a human applies that root. CI has no role on `rg-msi-ci`, so even an approved pipeline run cannot add a trust rule or widen its own permissions.
 
-**Just-in-time network access:** the Key Vault and the storage account deny all networks. Terraform ignores their IP lists, so no IP is ever committed. `scripts/azure-firewall-ip.sh` adds the caller's current IP before work and removes it after (`add`, `remove`, `reset`, `list`). The CI apply job will do the same and always remove the runner's IP, even on failure.
+**Just-in-time network access:** the Key Vault and the storage account deny all networks. Terraform ignores their IP lists, so no IP is ever committed. `scripts/azure-firewall-ip.sh` adds the caller's current IP before work and removes it after (`add`, `remove`, `reset`, `list`). The CI apply job does the same: it adds the runner's IP, applies, and always removes it, even on failure.
+
+**Immutable OIDC subject:** this repository's tokens carry GitHub's immutable subject (`repo:<owner>@<owner-id>/<repo>@<repo-id>:…`), and the trust rules match it. A renamed or re-created repository with the same name gets a different ID, so it cannot reuse the trust.
 
 **Accepted risk, documented inline:** SonarQube rule S6381 flags the *Contributor* assignment. It is scoped to one resource group, usable only from the approval-gated environment, and cannot be used to grant roles. The decision sits next to the code as a `NOSONAR` comment with its reason.
 
@@ -178,6 +188,7 @@ The tools that check the code are secured too:
 
 ```
 .github/workflows/security-scan.yml   PR and main security gates
+.github/workflows/terraform-azure.yml Azure deploys: plan on PRs, approval-gated apply on main
 .github/dependabot.yml                weekly updates for Actions, Terraform and pip
 .devcontainer/                        Codespaces environment with every scanner installed
 terraform/modules/<cloud>-<purpose>/  reusable, secure-by-default modules
