@@ -18,3 +18,25 @@ variable "allowed_ip_cidrs" {
   description = "Public IPs in CIDR form allowed through the Key Vault and storage firewalls."
   type        = list(string)
 }
+
+variable "admin_object_id" {
+  description = "Entra ID object ID of the human admin who may manage Key Vault keys."
+  type        = string
+}
+
+variable "github_repository" {
+  description = "GitHub repository (owner/name) whose workflows may sign in to Azure."
+  type        = string
+  default     = "Subash-1507/multicloud-secure-iac"
+}
+
+variable "tfstate_resource_group_name" {
+  description = "Resource group of the Terraform state storage account."
+  type        = string
+  default     = "rg-msi-tfstate"
+}
+
+variable "tfstate_storage_account_name" {
+  description = "Name of the Terraform state storage account (created during bootstrap)."
+  type        = string
+}
