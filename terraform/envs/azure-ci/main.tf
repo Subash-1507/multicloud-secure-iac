@@ -46,7 +46,7 @@ resource "azurerm_federated_identity_credential" "gha_plan_pr" {
   user_assigned_identity_id = azurerm_user_assigned_identity.gha_plan.id
   issuer                    = local.github_oidc_issuer
   audience                  = local.github_oidc_audience
-  subject                   = "repo:${var.github_repository}:pull_request"
+  subject                   = "${var.github_oidc_subject_prefix}:pull_request"
 }
 
 resource "azurerm_role_assignment" "gha_plan_reader" {
@@ -77,7 +77,7 @@ resource "azurerm_federated_identity_credential" "gha_apply_env" {
   user_assigned_identity_id = azurerm_user_assigned_identity.gha_apply.id
   issuer                    = local.github_oidc_issuer
   audience                  = local.github_oidc_audience
-  subject                   = "repo:${var.github_repository}:environment:azure-dev"
+  subject                   = "${var.github_oidc_subject_prefix}:environment:azure-dev"
 }
 
 resource "azurerm_role_assignment" "gha_apply_contributor" {

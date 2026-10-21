@@ -1,0 +1,151 @@
+name: terraform-azure
+
+# Plan on pull requests with a read-only identity; apply on main after a human approves the azure-dev environment.
+# Azure sign-in uses GitHub OIDC: no client secrets exist. IDs are stored as secrets so they are masked in public logs.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "terraform/envs/azure-dev/**"
+      - "terraform/modules/azure-secure-storage/**"
+      - "scripts/azure-firewall-ip.sh"
+      - ".github/workflows/terraform-azure.yml"
+  push:
+    branches: [main]
+    paths:
+      - "terraform/envs/azure-dev/**"
+      - "terraform/modules/azure-secure-storage/**"
+      - "scripts/azure-firewall-ip.sh"
+      - ".github/workflows/terraform-azure.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TF_VERSION: "1.16.5"
+  ARM_USE_OIDC: "true" # Terraform provider and backend sign in with the GitHub OIDC token
+  ARM_RESOURCE_PROVIDER_REGISTRATIONS: "none" # CI identities have no subscription-level rights
+  TF_VAR_owner: subash
+  # Only used when the firewalls are first created; Terraform ignores the IP lists afterwards (TEST-NET-3 placeholder)
+  TF_VAR_allowed_ip_cidrs: '["203.0.113.10/32"]'
+
+jobs:
+  plan:
+    name: Terraform plan (azure-dev)
+    # Fork PRs get no secrets and no OIDC trust, so skip them
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # request the OIDC token
+    concurrency:
+      group: azure-dev-plan-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID_PLAN }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_admin_object_id: ${{ secrets.AZURE_ADMIN_OBJECT_ID }}
+      TFSTATE_RG: ${{ secrets.TFSTATE_RESOURCE_GROUP }}
+      TFSTATE_SA: ${{ secrets.TFSTATE_STORAGE_ACCOUNT }}
+    defaults:
+      run:
+        working-directory: terraform/envs/azure-dev
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform init
+        run: >-
+          terraform init -no-color
+          -backend-config="resource_group_name=$TFSTATE_RG"
+          -backend-config="storage_account_name=$TFSTATE_SA"
+          -backend-config="container_name=tfstate"
+
+      # -refresh=false: the plan identity cannot (and should not) open the firewalls, so it compares code with saved state
+      - name: terraform plan
+        run: terraform plan -refresh=false -lock-timeout=5m -no-color -out=tfplan > /dev/null
+
+      - name: Plan summary (resource names and counts only, no IDs)
+        run: |
+          {
+            echo "### Terraform plan (azure-dev)"
+            echo '```'
+            terraform show -no-color tfplan | grep -E '^  # |^Plan:|^No changes' || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    name: Terraform apply (azure-dev)
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: azure-dev # waits for my approval; the apply identity trusts only this environment
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: azure-dev-apply
+      cancel-in-progress: false # never cancel a running apply; later runs queue
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID_APPLY }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_admin_object_id: ${{ secrets.AZURE_ADMIN_OBJECT_ID }}
+      TFSTATE_RG: ${{ secrets.TFSTATE_RESOURCE_GROUP }}
+      TFSTATE_SA: ${{ secrets.TFSTATE_STORAGE_ACCOUNT }}
+    defaults:
+      run:
+        working-directory: terraform/envs/azure-dev
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Azure login (OIDC, for the firewall commands)
+        id: login
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID_APPLY }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Open firewalls for this runner (just in time)
+        working-directory: .
+        run: scripts/azure-firewall-ip.sh add && sleep 60
+
+      - name: terraform init
+        run: >-
+          terraform init -no-color
+          -backend-config="resource_group_name=$TFSTATE_RG"
+          -backend-config="storage_account_name=$TFSTATE_SA"
+          -backend-config="container_name=tfstate"
+
+      - name: terraform plan
+        run: terraform plan -lock-timeout=5m -no-color -out=tfplan > /dev/null
+
+      - name: Plan summary (resource names and counts only, no IDs)
+        run: |
+          {
+            echo "### Terraform apply plan (azure-dev)"
+            echo '```'
+            terraform show -no-color tfplan | grep -E '^  # |^Plan:|^No changes' || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: terraform apply
+        run: terraform apply -no-color -lock-timeout=5m tfplan
+
+      - name: Close firewalls (always, even if apply failed)
+        if: always() && steps.login.outcome == 'success'
+        working-directory: .
+        run: scripts/azure-firewall-ip.sh remove
