@@ -58,7 +58,7 @@ resource "azurerm_federated_identity_credential" "gha_apply_env" {
 
 resource "azurerm_role_assignment" "gha_apply_contributor" {
   scope                = azurerm_resource_group.this.id
-  role_definition_name = "Contributor"
+  role_definition_name = "Contributor" # NOSONAR(terraform:S6381): one RG, approval-gated azure-dev env only; Contributor cannot grant roles and RBAC Admin is ABAC-limited to the Key Vault roles
   principal_id         = azurerm_user_assigned_identity.gha_apply.principal_id
   principal_type       = "ServicePrincipal"
 }
