@@ -20,5 +20,9 @@ module "secure_storage" {
   location            = azurerm_resource_group.this.location
   resource_group_name = azurerm_resource_group.this.name
   allowed_ip_cidrs    = var.allowed_ip_cidrs
-  tags                = local.tags
+  key_vault_admins = {
+    subash       = var.admin_object_id
+    github_apply = azurerm_user_assigned_identity.gha_apply.principal_id
+  }
+  tags = local.tags
 }

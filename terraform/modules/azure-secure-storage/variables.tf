@@ -33,3 +33,13 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "key_vault_admins" {
+  description = "Identities allowed to create and rotate keys: map of a stable name to an Entra ID object ID."
+  type        = map(string)
+
+  validation {
+    condition     = length(var.key_vault_admins) > 0
+    error_message = "Give at least one Key Vault admin."
+  }
+}

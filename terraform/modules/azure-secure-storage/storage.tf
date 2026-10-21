@@ -70,7 +70,8 @@ resource "azurerm_storage_account" "data" {
   tags = var.tags
 
   lifecycle {
-    prevent_destroy = true # holds data; deleting it must be a deliberate code change
+    prevent_destroy = true                        # holds data; deleting it must be a deliberate code change
+    ignore_changes  = [network_rules[0].ip_rules] # IPs are added just-in-time; default Deny stays in code
   }
 
   depends_on = [azurerm_role_assignment.storage_key_user]

@@ -1,2 +1,4 @@
 owner = "subash"
 allowed_ip_cidrs = ["203.0.113.10/32"] # replace with your IP: curl -s https://api.ipify.org
+admin_object_id              = "00000000-0000-0000-0000-000000000000" # az ad signed-in-user show --query id -o tsv
+tfstate_storage_account_name = "<your-state-storage-account>"

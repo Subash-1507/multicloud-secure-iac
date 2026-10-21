@@ -26,15 +26,23 @@ resource "azurerm_key_vault" "this" {
   tags = var.tags
 
   lifecycle {
-    prevent_destroy = true # deleting the vault would destroy the key that protects our data
+    prevent_destroy = true                       # deleting the vault would destroy the key that protects our data
+    ignore_changes  = [network_acls[0].ip_rules] # IPs are added just-in-time (codespace script, CI runner); default Deny stays in code
   }
 }
 
-# Data-plane role: lets the identity running Terraform create and rotate keys in this vault only
-resource "azurerm_role_assignment" "terraform_crypto_officer" {
+# Data-plane role for each identity allowed to manage keys (you + the CI deploy identity), this vault only
+resource "azurerm_role_assignment" "crypto_officer" {
+  for_each             = var.key_vault_admins
   scope                = azurerm_key_vault.this.id
   role_definition_name = "Key Vault Crypto Officer"
-  principal_id         = data.azurerm_client_config.current.object_id
+  principal_id         = each.value
+}
+
+# The old single assignment (for you) becomes the "subash" entry: no destroy/recreate
+moved {
+  from = azurerm_role_assignment.terraform_crypto_officer
+  to   = azurerm_role_assignment.crypto_officer["subash"]
 }
 
 resource "azurerm_key_vault_key" "cmk" {
@@ -60,5 +68,5 @@ resource "azurerm_key_vault_key" "cmk" {
     ignore_changes  = [expiration_date] # timestamp() changes on every run; rotation manages expiry from here on
   }
 
-  depends_on = [azurerm_role_assignment.terraform_crypto_officer]
+  depends_on = [azurerm_role_assignment.crypto_officer]
 }
