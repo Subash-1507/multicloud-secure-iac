@@ -1,0 +1,3 @@
+resource_group_name  = "rg-msi-tfstate"
+storage_account_name = "<your-state-storage-account>"
+container_name       = "tfstate"

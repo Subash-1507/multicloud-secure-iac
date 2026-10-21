@@ -12,13 +12,3 @@ output "storage_account_name" {
   description = "Storage account encrypted with the customer-managed key."
   value       = module.secure_storage.storage_account_name
 }
-
-output "gha_plan_client_id" {
-  description = "Client ID for the GitHub Actions plan identity (not a secret)."
-  value       = azurerm_user_assigned_identity.gha_plan.client_id
-}
-
-output "gha_apply_client_id" {
-  description = "Client ID for the GitHub Actions apply identity (not a secret)."
-  value       = azurerm_user_assigned_identity.gha_apply.client_id
-}
