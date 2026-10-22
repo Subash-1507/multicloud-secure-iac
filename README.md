@@ -4,7 +4,7 @@
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=Subash-1507_multicloud-secure-iac&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=Subash-1507_multicloud-secure-iac)
 [![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=Subash-1507_multicloud-secure-iac&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=Subash-1507_multicloud-secure-iac)
 
-Secure-by-default infrastructure as code for **Azure and AWS**, written in **Terraform** and gated by an automated **DevSecOps pipeline**. Nothing reaches `main` without passing SAST, IaC misconfiguration scanning, secret detection and linting, and nothing reaches Azure without my approval. The Azure environment is **deployed and live**; the deploy pipeline holds **no stored cloud credentials**.
+Secure-by-default infrastructure as code for **Azure and AWS**, written in **Terraform** and gated by an automated **DevSecOps pipeline**. Nothing reaches `main` without passing SAST, IaC misconfiguration scanning, secret detection and linting, and nothing reaches Azure without my approval. The Azure environment was **deployed and verified end to end**, then **torn down** in October 2026 to save cloud credits; the evidence below is from the live deployment. The deploy pipeline holds **no stored cloud credentials**.
 
 > 📄 **Case study:** [How I hardened this pipeline's tool supply chain](docs/case-studies/01-ci-supply-chain-hardening.md): SonarQube security rating C → A, hash-verified dependencies, 10/10 CI gates.
 
@@ -67,12 +67,12 @@ The project is **complete** for its current scope. Items marked *Future work* ar
 | CI security gates (7 required checks, protected `main`) | ✅ Done |
 | Hash-locked tool supply chain | ✅ Done ([case study](docs/case-studies/01-ci-supply-chain-hardening.md)) |
 | Codespaces dev container with `make scan` | ✅ Done |
-| Azure dev environment (resource group, remote state with Entra ID auth, no keys) | ✅ Deployed |
-| Azure Key Vault + customer-managed key (RBAC, purge protection, firewall, auto-rotation) | ✅ Deployed |
-| Azure storage account encrypted with the customer-managed key (ZRS, double encryption, no shared keys, firewall) | ✅ Deployed |
-| GitHub OIDC identities in their own resource group, ABAC-limited role delegation | ✅ Deployed |
+| Azure dev environment (resource group, remote state with Entra ID auth, no keys) | ✅ Deployed and verified · torn down |
+| Azure Key Vault + customer-managed key (RBAC, purge protection, firewall, auto-rotation) | ✅ Deployed and verified · torn down |
+| Azure storage account encrypted with the customer-managed key (ZRS, double encryption, no shared keys, firewall) | ✅ Deployed and verified · torn down |
+| GitHub OIDC identities in their own resource group, ABAC-limited role delegation | ✅ Deployed and verified · torn down |
 | Just-in-time firewall access (`scripts/azure-firewall-ip.sh`) | ✅ Done |
-| GitHub Actions deploys: plan on every PR, apply on `main` after my approval | ✅ Live |
+| GitHub Actions deploys: plan on every PR, apply on `main` after my approval | ✅ Ran successfully · workflow disabled after teardown |
 | AWS secure storage module (S3 + customer-managed KMS key) | ✅ Written and scanned · ⛔ deploy blocked by the account's AWS Organizations SCP |
 | Ansible `baseline_hardening` role (SSH, sysctl, auditd, ufw, automatic updates) | ✅ Written and linted · 🗓️ Future work: run on a host |
 | Linux VM hardened by Ansible; AWS EC2 over SSM | 🗓️ Future work |
@@ -144,7 +144,7 @@ The project is **complete** for its current scope. Items marked *Future work* ar
 ## Architecture
 
 ```
- Azure (Southeast Asia) · deployed                AWS (ap-south-1) · written and scanned
+ Azure (Southeast Asia) · deployed, then torn down  AWS (ap-south-1) · written and scanned
  ├─ rg-msi-dev  (workload, deployed by CI)        ├─ S3 data bucket
  │   ├─ Key Vault: RBAC, purge protection,        │   SSE-KMS, customer-managed key
  │   │   firewall deny, just-in-time IP           │   TLS 1.2+ only, no public access
@@ -267,6 +267,8 @@ pip-compile --generate-hashes --allow-unsafe --output-file requirements-dev.txt 
 ```
 
 ### Deploying the Azure dev environment
+
+> **Current state:** all Azure resources were deleted after the project was verified, and the `terraform-azure` workflow is disabled. To redeploy: bootstrap the state storage account, apply `terraform/envs/azure-ci` (human only), update the client-ID secrets, apply `azure-dev`, then re-enable the workflow.
 
 **Normal path:** open a pull request. The **Terraform plan (azure-dev)** check shows what would change. Merge it, approve the `azure-dev` deployment, and the pipeline applies it.
 
